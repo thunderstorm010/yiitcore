@@ -32,7 +32,7 @@ public Action WS_OpenIncConn(WebsocketHandle websocket, WebsocketHandle newWebso
 	}
 	else
 	{
-		Websocket_Close(websocket);
+		Websocket_UnhookChild(newWebsocket);
 	}
 }
 
