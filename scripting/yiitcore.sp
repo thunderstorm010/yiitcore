@@ -3,7 +3,7 @@
 
 public Plugin myinfo =
 {
-	name        = "yiitcore-poll",
+	name        = "yiitcore",
 	author      = "Me",
 	description = "My first plugin ever",
 	version     = "1.0",
@@ -11,86 +11,86 @@ public Plugin myinfo =
 };
 
 ConVar cv_Url;
-ConVar cv_Auth;
-
+// ConVar cv_Interval;
 public void OnPluginStart()
 {
-	PrintToChatAll("[SM] Loaded yiitcore-poll.");
-	cv_Url  = CreateConVar("yiitcore_url_base", "url");
-	cv_Auth = CreateConVar("yiitcore_auth", "D5J4Zb3IG2wJAKFretvYQsR8pCWJHryd");
-	AutoExecConfig(true, "yiitcore-poll");
-	CreateTimer(10.0, Timer_SendReq, _, TIMER_REPEAT);
+	cv_Url = CreateConVar("yiitcore_url", "--default", "Base URL of the poll server.", FCVAR_PROTECTED);
+	//	cv_Interval = CreateConVar("yiitcore_poll_interval", "10", "Interval of polling.", FCVAR_NONE, true, 1.0);
+	AutoExecConfig();
+	CreateTimer(10.0, Timer_Callback, _, TIMER_REPEAT);
+	PrintToServer("[SM] loaded yiitcore");
 }
 
-public Action Timer_SendReq(Handle timer)
+public void HandleError(bool b, char[] name)
 {
-	char baseUrl[256];
-	char auth[64];
-
-	cv_Url.GetString(baseUrl, 128);
-	cv_Auth.GetString(auth, 64);
-
-	StrCat(baseUrl, 256, "/yiitcore");
-
-	Handle request = SteamWorks_CreateHTTPRequest(k_EHTTPMethodGET, baseUrl);
-	bool   a       = SteamWorks_SetHTTPRequestNetworkActivityTimeout(request, 10);
-	bool   b       = SteamWorks_SetHTTPRequestHeaderValue(request, "authorization", auth);
-	bool   c       = SteamWorks_SetHTTPRequestContextValue(request, 5);
-	bool   d       = SteamWorks_SetHTTPCallbacks(request, Callback_Get);
-	if (!a || !b || !c || !d)
+	if (!b)
 	{
-		PrintToChatAll("[SM] error yiitcore-poll: failed request (abcd)");
-		CloseHandle(request);
-		return Plugin_Continue;
+		PrintToServer("[SM] yiitcore error: %s", name);
 	}
-	bool b_DidSendRequest = SteamWorks_SendHTTPRequestAndStreamResponse(request);
-	if (!b_DidSendRequest)
+}
+
+public Action Timer_Callback(Handle h_Timer)
+{
+	char s_Url[1033];
+	cv_Url.GetString(s_Url, 1024);
+	if (StrEqual(s_Url, "--default"))
 	{
-		PrintToChatAll("[SM] error yiitcore-poll: failed request (shrasr)");
-		CloseHandle(request);
-		return Plugin_Continue;
+		return Plugin_Stop;
 	}
-	bool e = SteamWorks_PrioritizeHTTPRequest(request);
-	if (!e)
-	{
-		PrintToChatAll("[SM] error yiitcore-poll: failed request (e)");
-		CloseHandle(request);
-		return Plugin_Continue;
-	}
+	StrCat(s_Url, 1024, "/yiitcore");
+
+	Handle h_Request = SteamWorks_CreateHTTPRequest(k_EHTTPMethodGET, s_Url);
+	SteamWorks_SetHTTPRequestHeaderValue(h_Request, "authorization", "D5J4Zb3IG2wJAKFretvYQsR8pCWJHryd");
+	SteamWorks_SetHTTPRequestContextValue(h_Request, h_Timer);
+	SteamWorks_SetHTTPRequestNetworkActivityTimeout(h_Request, 10);
+	SteamWorks_SetHTTPCallbacks(h_Request, Request_Completed);
+	SteamWorks_SendHTTPRequest(h_Request);
+	SteamWorks_PrioritizeHTTPRequest(h_Request);
 	return Plugin_Continue;
 }
 
-public void Callback_Get(Handle hRequest, bool bFailure, bool bRequestSuccessful, EHTTPStatusCode status, any data)
+public void Request_Completed(Handle h_Request, bool b_Failure, bool b_Successful, EHTTPStatusCode statusCode, Handle h_Timer)
 {
-	if (!bRequestSuccessful || bFailure)
+	if (!b_Successful)
 	{
-		PrintToChatAll("[SM] error yiitcore-poll: request unsuccessful");
-		CloseHandle(hRequest);
+		LogMessage("There was an error with the request.");
+		delete h_Request;
 		return;
 	}
-	if (status != k_EHTTPStatusCode200OK)
+
+	if (statusCode == k_EHTTPStatusCode200OK)
 	{
-		if (status == k_EHTTPStatusCode401Unauthorized)
+		int iSize;
+		SteamWorks_GetHTTPResponseBodySize(h_Request, iSize);
+		char[] body = new char[iSize];
+		SteamWorks_GetHTTPResponseBodyData(h_Request, body, iSize);
+
+		int command_count_value_size;
+		SteamWorks_GetHTTPResponseHeaderSize(h_Request, "X-Commands-Count", command_count_value_size);
+		char[] command_count_value = new char[command_count_value_size];
+		SteamWorks_GetHTTPResponseHeaderValue(h_Request, "X-Commands-Count", command_count_value, command_count_value_size);
+
+		int command_max_length_size;
+		SteamWorks_GetHTTPResponseHeaderSize(h_Request, "X-Commands-Length-Max", command_max_length_size);
+		char[] command_max_length_value = new char[command_max_length_size];
+		SteamWorks_GetHTTPResponseHeaderValue(h_Request, "X-Commands-Length-Max", command_max_length_value, command_max_length_size);
+
+		// don't forget \0
+		int command_count      = StringToInt(command_count_value) + 1;
+		int command_max_length = StringToInt(command_max_length_value) + 1;
+
+		char[][] commands = new char[command_max_length][command_count];
+		ExplodeString(body, "\n", commands, command_count, command_max_length);
+
+		for (int i = 0; i < command_count; i++)
 		{
-			PrintToChatAll("[SM] error yiitcore-poll: wrong auth");
-		}
-		else {
-			PrintToChatAll("[SM] error yiitcore-poll: unexpected response code");
-		}
-		delete hRequest;
-		return;
-	}
+			char[] command = new char[command_max_length];
+			strcopy(command, command_max_length, commands[i]);
 
-	SteamWorks_GetHTTPResponseBodyCallback(hRequest, Callback_Body);
-	delete hRequest;
-}
-
-public void Callback_Body(char[] sData)
-{
-	char commands[256][128];
-	int  cString = ExplodeString(sData, "\n", commands, 128, 256);
-	for (int i = 0; i < cString; i++)
-	{
-		ServerCommand(commands[i]);
+			ServerCommand("%s", command);
+			PrintToChatAll("[SM] Discord tarafından '%s' çalıştırıldı!", command);
+		}
 	}
+	delete h_Request;
+	return;
 }
